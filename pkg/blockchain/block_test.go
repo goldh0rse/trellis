@@ -2,6 +2,8 @@ package blockchain
 
 import (
 	"bytes"
+	"encoding/hex"
+	"strings"
 	"testing"
 )
 
@@ -26,6 +28,30 @@ func TestComputeHashDeterministic(t *testing.T) {
 	second := b.ComputeHash()
 	if !bytes.Equal(first, second) {
 		t.Fatalf("ComputeHash not deterministic: %x != %x", first, second)
+	}
+}
+
+func TestMineMeetsDifficulty(t *testing.T) {
+	const difficulty = 3
+
+	b := &Block{
+		Timestamp:    1_700_000_000,
+		Transactions: nil,
+		PrevHash:     []byte{0xde, 0xad, 0xbe, 0xef},
+	}
+
+	attempts := b.Mine(difficulty)
+	if attempts == 0 {
+		t.Fatal("Mine should report at least one attempt")
+	}
+
+	// The mined hash must start with `difficulty` zero hex digits...
+	if prefix := strings.Repeat("0", difficulty); !strings.HasPrefix(hex.EncodeToString(b.Hash), prefix) {
+		t.Fatalf("mined hash %s does not start with %q", hex.EncodeToString(b.Hash), prefix)
+	}
+	// ...and Hash must be consistent with the stored Nonce.
+	if !bytes.Equal(b.Hash, b.ComputeHash()) {
+		t.Fatal("mined Hash does not match ComputeHash for the stored Nonce")
 	}
 }
 

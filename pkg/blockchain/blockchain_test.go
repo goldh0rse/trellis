@@ -5,6 +5,10 @@ import (
 	"testing"
 )
 
+// testDifficulty keeps mining instant in tests while still exercising the PoW
+// path (a few hundred attempts at most).
+const testDifficulty = 2
+
 // buildChain returns a chain with genesis (100 coins to alice) plus one block
 // holding a signed alice -> bobby : 30 transfer.
 func buildChain(t testing.TB) (*Blockchain, *Wallet, *Wallet) {
@@ -12,13 +16,13 @@ func buildChain(t testing.TB) (*Blockchain, *Wallet, *Wallet) {
 	alice := newTestWallet(t)
 	bobby := newTestWallet(t)
 
-	chain := NewBlockchain(alice.PublicKey(), 100)
+	chain := NewBlockchain(alice.PublicKey(), 100, testDifficulty)
 
 	tx := NewTransaction(alice.PublicKey(), bobby.PublicKey(), 30)
 	if err := tx.Sign(alice); err != nil {
 		t.Fatalf("Sign: %v", err)
 	}
-	if _, err := chain.AddBlock([]*Transaction{tx}); err != nil {
+	if _, _, err := chain.AddBlock([]*Transaction{tx}); err != nil {
 		t.Fatalf("AddBlock: %v", err)
 	}
 	return chain, alice, bobby
@@ -53,7 +57,7 @@ func TestChainBrokenLinkIsInvalid(t *testing.T) {
 
 func TestAddBlockEmptyChain(t *testing.T) {
 	bc := &Blockchain{} // no genesis, no tip
-	if _, err := bc.AddBlock(nil); err == nil {
+	if _, _, err := bc.AddBlock(nil); err == nil {
 		t.Fatal("AddBlock on an empty chain should fail, got nil")
 	}
 }
@@ -75,14 +79,38 @@ func TestCoinbaseOutsideGenesisIsInvalid(t *testing.T) {
 	alice := newTestWallet(t)
 	bobby := newTestWallet(t)
 
-	chain := NewBlockchain(alice.PublicKey(), 100)
+	chain := NewBlockchain(alice.PublicKey(), 100, testDifficulty)
 	// A coinbase verifies on its own, but is only allowed in genesis.
-	if _, err := chain.AddBlock([]*Transaction{NewCoinbaseTx(bobby.PublicKey(), 50)}); err != nil {
+	if _, _, err := chain.AddBlock([]*Transaction{NewCoinbaseTx(bobby.PublicKey(), 50)}); err != nil {
 		t.Fatalf("AddBlock: %v", err)
 	}
 
 	if err := chain.IsValid(); err == nil {
 		t.Fatal("a coinbase outside genesis should make the chain invalid, got nil")
+	}
+}
+
+func TestTamperedNonceIsInvalid(t *testing.T) {
+	chain, _, _ := buildChain(t)
+
+	// Change the mined nonce without re-mining: the stored Hash no longer
+	// matches ComputeHash, so the chain is invalid.
+	chain.Blocks[1].Nonce++
+
+	if err := chain.IsValid(); err == nil {
+		t.Fatal("chain with a tampered nonce should be invalid, got nil")
+	}
+}
+
+func TestInsufficientDifficultyIsInvalid(t *testing.T) {
+	chain, _, _ := buildChain(t) // mined at testDifficulty
+
+	// Raise the bar after the fact: blocks mined at testDifficulty are extremely
+	// unlikely to satisfy a much higher target, so PoW validation must fail.
+	chain.Difficulty = testDifficulty + 6
+
+	if err := chain.IsValid(); err == nil {
+		t.Fatal("chain whose blocks no longer meet difficulty should be invalid, got nil")
 	}
 }
 
@@ -94,13 +122,15 @@ func BenchmarkIsValid(b *testing.B) {
 		b.Run(fmt.Sprintf("blocks=%d", n), func(b *testing.B) {
 			alice := newTestWallet(b)
 			bobby := newTestWallet(b)
-			chain := NewBlockchain(alice.PublicKey(), 1_000_000)
+			// Difficulty 1 keeps mining negligible — this benchmark measures
+			// IsValid, not Proof of Work.
+			chain := NewBlockchain(alice.PublicKey(), 1_000_000, 1)
 			for range n {
 				tx := NewTransaction(alice.PublicKey(), bobby.PublicKey(), 1)
 				if err := tx.Sign(alice); err != nil {
 					b.Fatalf("Sign: %v", err)
 				}
-				if _, err := chain.AddBlock([]*Transaction{tx}); err != nil {
+				if _, _, err := chain.AddBlock([]*Transaction{tx}); err != nil {
 					b.Fatalf("AddBlock: %v", err)
 				}
 			}
