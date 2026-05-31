@@ -7,7 +7,7 @@ GO ?= go
 ADR_DIR := docs/architecture/decisions
 
 .DEFAULT_GOAL := help
-.PHONY: help build vet test cover run bench adr adr-list
+.PHONY: help build vet test cover run bench clean adr adr-list
 
 help: ## List available targets
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z0-9_-]+:.*##/ {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -29,6 +29,9 @@ run: ## Run the demo binary
 
 bench: ## Run benchmarks with allocation stats
 	$(GO) test -run=^$$ -bench=. -benchmem ./pkg/...
+
+clean: ## Remove build artifacts and the demo database
+	rm -f trellis trellis.db
 
 adr-list: ## List existing ADRs
 	@ls -1 $(ADR_DIR)/[0-9]*.md 2>/dev/null || echo "No ADRs yet."

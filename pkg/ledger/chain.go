@@ -2,87 +2,164 @@ package ledger
 
 import (
 	"bytes"
+	"encoding/hex"
 	"errors"
 	"fmt"
 )
 
-// Chain is the ordered chain of blocks. Phase 1 keeps it in memory; Phase 3 swaps
-// the slice for a bbolt-backed store. Difficulty is the Proof-of-Work target
-// every block (including genesis) must meet.
+// Chain is the blockchain, backed by a Store. It holds no blocks in memory; it
+// reads and writes them through the Store, so the chain survives restarts.
+// Difficulty is the Proof-of-Work target every block (including genesis) must meet.
 type Chain struct {
-	Blocks     []*Block
+	store      Store
 	Difficulty int
 }
 
-// NewChain creates a chain seeded with a mined genesis block whose single
-// coinbase transaction issues `reward` coins to `to`. The genesis block has an
-// empty PrevHash and is mined to `difficulty`, like every other block.
-func NewChain(to []byte, reward uint64, difficulty int) *Chain {
-	coinbase := NewCoinbaseTx(to, reward)
-	genesis := NewBlock([]*Transaction{coinbase}, nil)
-	genesis.Mine(difficulty)
-	return &Chain{Blocks: []*Block{genesis}, Difficulty: difficulty}
+// NewChain returns a chain backed by store. If the store is empty it mines a
+// genesis block whose single coinbase issues `reward` coins to `to`. If the store
+// already holds a chain, it is loaded as-is (genesis is NOT re-created).
+func NewChain(store Store, to []byte, reward uint64, difficulty int) (*Chain, error) {
+	tip, err := store.Tip()
+	if err != nil {
+		return nil, err
+	}
+	c := &Chain{store: store, Difficulty: difficulty}
+	if len(tip) == 0 {
+		genesis := NewBlock([]*Transaction{NewCoinbaseTx(to, reward)}, nil)
+		genesis.Mine(difficulty)
+		if err := store.AppendBlock(genesis); err != nil {
+			return nil, err
+		}
+	}
+	return c, nil
 }
 
 // AddBlock links a new block of transactions onto the current tip, mines it to
-// the chain's difficulty, and appends it. It returns the new block and the number
-// of hashing attempts mining took.
+// the chain's difficulty, and persists it. It returns the new block and the
+// number of hashing attempts mining took.
 func (c *Chain) AddBlock(txs []*Transaction) (*Block, uint64, error) {
-	if len(c.Blocks) == 0 {
-		return nil, 0, errors.New("cannot add block to empty chain")
+	tip, err := c.store.Tip()
+	if err != nil {
+		return nil, 0, err
 	}
-	tip := c.Blocks[len(c.Blocks)-1]
-	block := NewBlock(txs, tip.Hash)
+	if len(tip) == 0 {
+		return nil, 0, errors.New("cannot add block: chain has no genesis")
+	}
+	block := NewBlock(txs, tip)
 	attempts := block.Mine(c.Difficulty)
-	c.Blocks = append(c.Blocks, block)
+	if err := c.store.AppendBlock(block); err != nil {
+		return nil, 0, err
+	}
 	return block, attempts, nil
 }
 
-// IsValid verifies the whole chain, trusting nothing. For each block it checks,
-// in order:
-//  1. hash integrity   — the stored Hash equals a freshly recomputed ComputeHash
-//     (detects tampered block data, including a changed Nonce);
-//  2. proof of work     — the hash meets the chain's difficulty (detects a Nonce
-//     swapped in with a matching but unmined hash);
-//  3. link integrity    — genesis has an empty PrevHash; every other block's
-//     PrevHash equals the previous block's Hash;
-//  4. transaction validity — every transaction verifies (coinbase must be
-//     unsigned; others must carry a valid signature), and coinbase transactions
-//     may only appear in genesis.
+// Height returns the number of blocks in the chain (genesis included).
+func (c *Chain) Height() (int, error) {
+	it, err := c.Iterator()
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for {
+		b, err := it.Next()
+		if err != nil {
+			return 0, err
+		}
+		if b == nil {
+			break
+		}
+		n++
+	}
+	return n, nil
+}
+
+// Tip returns the hash of the most recent block (empty if the chain is empty).
+func (c *Chain) Tip() ([]byte, error) {
+	return c.store.Tip()
+}
+
+// IsValid verifies the whole chain by walking from the tip back to genesis,
+// trusting nothing. For each block, in order:
+//  1. reachability — the block's Hash equals the link target we followed to reach
+//     it (the tip for the first block, then each child's PrevHash);
+//  2. cycle guard  — a hash seen twice means a corrupted store;
+//  3. hash integrity — Hash equals a freshly recomputed ComputeHash (this also
+//     subsumes the old "PrevHash matches the previous block" check, since PrevHash
+//     and Nonce are part of ComputeHash);
+//  4. proof of work — the hash meets the chain's difficulty;
+//  5. transaction validity — every tx verifies, and coinbase transactions appear
+//     only in genesis (the block whose PrevHash is empty).
 //
-// The cheap structural checks run first so a tampered chain short-circuits before
-// the expensive signature verification. Returns the first failure as a wrapped
-// error, or nil if the entire chain is valid.
+// The walk must terminate at a genesis block; a dangling PrevHash surfaces as
+// ErrBlockNotFound from the iterator. Returns the first failure, or nil if valid.
 func (c *Chain) IsValid() error {
-	for i, b := range c.Blocks {
-		// 1. Hash integrity.
+	tip, err := c.store.Tip()
+	if err != nil {
+		return err
+	}
+	if len(tip) == 0 {
+		return errors.New("empty chain")
+	}
+
+	it, err := c.Iterator()
+	if err != nil {
+		return err
+	}
+
+	expected := tip
+	seen := make(map[string]bool)
+	sawGenesis := false
+
+	for {
+		b, err := it.Next()
+		if err != nil {
+			return err // includes ErrBlockNotFound: a broken/dangling link
+		}
+		if b == nil {
+			break
+		}
+
+		// 1. Reachability: the fetched block must actually be the one we linked to.
+		if !bytes.Equal(b.Hash, expected) {
+			return fmt.Errorf("block %s: stored hash does not match link target", Short(b.Hash))
+		}
+
+		// 2. Cycle guard.
+		key := hex.EncodeToString(b.Hash)
+		if seen[key] {
+			return fmt.Errorf("cycle detected at block %s", Short(b.Hash))
+		}
+		seen[key] = true
+
+		// 3. Hash integrity.
 		if !bytes.Equal(b.Hash, b.ComputeHash()) {
-			return fmt.Errorf("block %d: hash mismatch (data tampered)", i)
+			return fmt.Errorf("block %s: hash mismatch (data tampered)", Short(b.Hash))
 		}
 
-		// 2. Proof of work.
+		// 4. Proof of work.
 		if !meetsDifficulty(b.Hash, c.Difficulty) {
-			return fmt.Errorf("block %d: hash does not meet difficulty %d", i, c.Difficulty)
+			return fmt.Errorf("block %s: hash does not meet difficulty %d", Short(b.Hash), c.Difficulty)
 		}
 
-		// 3. Link integrity.
-		if i == 0 {
-			if len(b.PrevHash) != 0 {
-				return errors.New("genesis block must have empty PrevHash")
-			}
-		} else if !bytes.Equal(b.PrevHash, c.Blocks[i-1].Hash) {
-			return fmt.Errorf("block %d: PrevHash does not match previous block hash", i)
-		}
-
-		// 4. Transaction validity.
+		// 5. Transaction validity.
+		isGenesis := len(b.PrevHash) == 0
 		for j, tx := range b.Transactions {
 			if err := tx.Verify(); err != nil {
-				return fmt.Errorf("block %d tx %d: %w", i, j, err)
+				return fmt.Errorf("block %s tx %d: %w", Short(b.Hash), j, err)
 			}
-			if tx.IsCoinbase() && i != 0 {
-				return fmt.Errorf("block %d tx %d: unexpected coinbase outside genesis", i, j)
+			if tx.IsCoinbase() && !isGenesis {
+				return fmt.Errorf("block %s tx %d: unexpected coinbase outside genesis", Short(b.Hash), j)
 			}
 		}
+
+		if isGenesis {
+			sawGenesis = true
+		}
+		expected = b.PrevHash
+	}
+
+	if !sawGenesis {
+		return errors.New("chain does not terminate at a genesis block")
 	}
 	return nil
 }

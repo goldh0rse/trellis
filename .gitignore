@@ -1,6 +1,9 @@
 # Compiled binary (go build ./cmd/trellis)
 /trellis
 
+# Persisted chain database (created by the demo)
+/trellis.db
+
 # Test binaries and profiling / coverage output
 *.test
 *.out
