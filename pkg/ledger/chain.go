@@ -1,4 +1,4 @@
-package blockchain
+package ledger
 
 import (
 	"bytes"
@@ -6,36 +6,35 @@ import (
 	"fmt"
 )
 
-// Blockchain is the ordered chain of blocks. Phase 1 keeps it in memory; Phase 3
-// swaps the slice for a bbolt-backed store. Difficulty is the Proof-of-Work
-// target every block (including genesis) must meet.
-type Blockchain struct {
+// Chain is the ordered chain of blocks. Phase 1 keeps it in memory; Phase 3 swaps
+// the slice for a bbolt-backed store. Difficulty is the Proof-of-Work target
+// every block (including genesis) must meet.
+type Chain struct {
 	Blocks     []*Block
 	Difficulty int
 }
 
-// NewBlockchain creates a chain seeded with a mined genesis block whose single
+// NewChain creates a chain seeded with a mined genesis block whose single
 // coinbase transaction issues `reward` coins to `to`. The genesis block has an
 // empty PrevHash and is mined to `difficulty`, like every other block.
-func NewBlockchain(to []byte, reward uint64, difficulty int) *Blockchain {
+func NewChain(to []byte, reward uint64, difficulty int) *Chain {
 	coinbase := NewCoinbaseTx(to, reward)
 	genesis := NewBlock([]*Transaction{coinbase}, nil)
 	genesis.Mine(difficulty)
-	return &Blockchain{Blocks: []*Block{genesis}, Difficulty: difficulty}
+	return &Chain{Blocks: []*Block{genesis}, Difficulty: difficulty}
 }
 
 // AddBlock links a new block of transactions onto the current tip, mines it to
-// the chain's difficulty, and appends it. It returns the new block and the
-// number of hashing attempts mining took. Phase 1 balance checks are still out
-// of scope (Phase 4).
-func (bc *Blockchain) AddBlock(txs []*Transaction) (*Block, uint64, error) {
-	if len(bc.Blocks) == 0 {
+// the chain's difficulty, and appends it. It returns the new block and the number
+// of hashing attempts mining took.
+func (c *Chain) AddBlock(txs []*Transaction) (*Block, uint64, error) {
+	if len(c.Blocks) == 0 {
 		return nil, 0, errors.New("cannot add block to empty chain")
 	}
-	tip := bc.Blocks[len(bc.Blocks)-1]
+	tip := c.Blocks[len(c.Blocks)-1]
 	block := NewBlock(txs, tip.Hash)
-	attempts := block.Mine(bc.Difficulty)
-	bc.Blocks = append(bc.Blocks, block)
+	attempts := block.Mine(c.Difficulty)
+	c.Blocks = append(c.Blocks, block)
 	return block, attempts, nil
 }
 
@@ -48,22 +47,22 @@ func (bc *Blockchain) AddBlock(txs []*Transaction) (*Block, uint64, error) {
 //  3. link integrity    — genesis has an empty PrevHash; every other block's
 //     PrevHash equals the previous block's Hash;
 //  4. transaction validity — every transaction verifies (coinbase must be
-//     unsigned; others must carry a valid ML-DSA signature), and coinbase
-//     transactions may only appear in genesis.
+//     unsigned; others must carry a valid signature), and coinbase transactions
+//     may only appear in genesis.
 //
-// The cheap structural checks run first so a tampered chain short-circuits
-// before the expensive signature verification. Returns the first failure as a
-// wrapped error, or nil if the entire chain is valid.
-func (bc *Blockchain) IsValid() error {
-	for i, b := range bc.Blocks {
+// The cheap structural checks run first so a tampered chain short-circuits before
+// the expensive signature verification. Returns the first failure as a wrapped
+// error, or nil if the entire chain is valid.
+func (c *Chain) IsValid() error {
+	for i, b := range c.Blocks {
 		// 1. Hash integrity.
 		if !bytes.Equal(b.Hash, b.ComputeHash()) {
 			return fmt.Errorf("block %d: hash mismatch (data tampered)", i)
 		}
 
 		// 2. Proof of work.
-		if !meetsDifficulty(b.Hash, bc.Difficulty) {
-			return fmt.Errorf("block %d: hash does not meet difficulty %d", i, bc.Difficulty)
+		if !meetsDifficulty(b.Hash, c.Difficulty) {
+			return fmt.Errorf("block %d: hash does not meet difficulty %d", i, c.Difficulty)
 		}
 
 		// 3. Link integrity.
@@ -71,7 +70,7 @@ func (bc *Blockchain) IsValid() error {
 			if len(b.PrevHash) != 0 {
 				return errors.New("genesis block must have empty PrevHash")
 			}
-		} else if !bytes.Equal(b.PrevHash, bc.Blocks[i-1].Hash) {
+		} else if !bytes.Equal(b.PrevHash, c.Blocks[i-1].Hash) {
 			return fmt.Errorf("block %d: PrevHash does not match previous block hash", i)
 		}
 

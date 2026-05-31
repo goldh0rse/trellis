@@ -1,24 +1,16 @@
-package blockchain
+package ledger_test
 
-import "testing"
+import (
+	"testing"
 
-// newTestWallet fails the test/benchmark rather than returning an error,
-// keeping the bodies focused on behaviour. It takes testing.TB so both tests
-// and benchmarks can use it.
-func newTestWallet(tb testing.TB) *Wallet {
-	tb.Helper()
-	w, err := NewWallet()
-	if err != nil {
-		tb.Fatalf("NewWallet: %v", err)
-	}
-	return w
-}
+	"github.com/goldh0rse/trellis/pkg/ledger"
+)
 
 func TestTransactionSignVerifyRoundTrip(t *testing.T) {
 	alice := newTestWallet(t)
 	bobby := newTestWallet(t)
 
-	tx := NewTransaction(alice.PublicKey(), bobby.PublicKey(), 42)
+	tx := ledger.NewTransaction(alice.PublicKey(), bobby.PublicKey(), 42)
 	if err := tx.Sign(alice); err != nil {
 		t.Fatalf("Sign: %v", err)
 	}
@@ -31,7 +23,7 @@ func TestTransactionTamperedAmountFailsVerify(t *testing.T) {
 	alice := newTestWallet(t)
 	bobby := newTestWallet(t)
 
-	tx := NewTransaction(alice.PublicKey(), bobby.PublicKey(), 42)
+	tx := ledger.NewTransaction(alice.PublicKey(), bobby.PublicKey(), 42)
 	if err := tx.Sign(alice); err != nil {
 		t.Fatalf("Sign: %v", err)
 	}
@@ -48,7 +40,7 @@ func TestTransactionSignWrongWalletFails(t *testing.T) {
 	mallory := newTestWallet(t)
 
 	// From is Alice, but Mallory tries to sign it.
-	tx := NewTransaction(alice.PublicKey(), bobby.PublicKey(), 42)
+	tx := ledger.NewTransaction(alice.PublicKey(), bobby.PublicKey(), 42)
 	if err := tx.Sign(mallory); err == nil {
 		t.Fatal("signing with a wallet that does not own From should fail, got nil")
 	}
@@ -57,7 +49,7 @@ func TestTransactionSignWrongWalletFails(t *testing.T) {
 func TestCoinbaseVerify(t *testing.T) {
 	bobby := newTestWallet(t)
 
-	cb := NewCoinbaseTx(bobby.PublicKey(), 100)
+	cb := ledger.NewCoinbaseTx(bobby.PublicKey(), 100)
 	if !cb.IsCoinbase() {
 		t.Fatal("NewCoinbaseTx should produce a coinbase transaction")
 	}
@@ -74,7 +66,7 @@ func TestCoinbaseVerify(t *testing.T) {
 
 func TestSignCoinbaseRejected(t *testing.T) {
 	bobby := newTestWallet(t)
-	cb := NewCoinbaseTx(bobby.PublicKey(), 100)
+	cb := ledger.NewCoinbaseTx(bobby.PublicKey(), 100)
 	if err := cb.Sign(bobby); err == nil {
 		t.Fatal("signing a coinbase should fail, got nil")
 	}
@@ -85,7 +77,7 @@ func TestVerifyMissingSignature(t *testing.T) {
 	bobby := newTestWallet(t)
 
 	// A non-coinbase transaction that was never signed.
-	tx := NewTransaction(alice.PublicKey(), bobby.PublicKey(), 5)
+	tx := ledger.NewTransaction(alice.PublicKey(), bobby.PublicKey(), 5)
 	if err := tx.Verify(); err == nil {
 		t.Fatal("Verify should fail for an unsigned non-coinbase tx, got nil")
 	}
@@ -94,9 +86,9 @@ func TestVerifyMissingSignature(t *testing.T) {
 func TestVerifyMalformedFromFails(t *testing.T) {
 	bobby := newTestWallet(t)
 
-	// From is not a valid ML-DSA public key, but a signature is present so we
-	// get past the missing-signature check and into public-key reconstruction.
-	tx := &Transaction{
+	// From is not a valid public key, but a signature is present so we get past
+	// the missing-signature check and into public-key reconstruction.
+	tx := &ledger.Transaction{
 		From:      []byte("not a real public key"),
 		To:        bobby.PublicKey(),
 		Amount:    5,
@@ -104,39 +96,5 @@ func TestVerifyMalformedFromFails(t *testing.T) {
 	}
 	if err := tx.Verify(); err == nil {
 		t.Fatal("Verify should fail when From is not a valid public key, got nil")
-	}
-}
-
-// BenchmarkSignTransaction measures producing one ML-DSA-44 signature over a
-// transaction's signing payload.
-func BenchmarkSignTransaction(b *testing.B) {
-	alice := newTestWallet(b)
-	bobby := newTestWallet(b)
-	tx := NewTransaction(alice.PublicKey(), bobby.PublicKey(), 42)
-
-	b.ReportAllocs()
-	for b.Loop() {
-		if err := tx.Sign(alice); err != nil {
-			b.Fatalf("Sign: %v", err)
-		}
-	}
-}
-
-// BenchmarkVerifyTransaction measures verifying one signed transaction. This is
-// the per-transaction hot path inside Blockchain.IsValid: it reconstructs the
-// public key from raw bytes and runs ML-DSA verification.
-func BenchmarkVerifyTransaction(b *testing.B) {
-	alice := newTestWallet(b)
-	bobby := newTestWallet(b)
-	tx := NewTransaction(alice.PublicKey(), bobby.PublicKey(), 42)
-	if err := tx.Sign(alice); err != nil {
-		b.Fatalf("Sign: %v", err)
-	}
-
-	b.ReportAllocs()
-	for b.Loop() {
-		if err := tx.Verify(); err != nil {
-			b.Fatalf("Verify: %v", err)
-		}
 	}
 }

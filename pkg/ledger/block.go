@@ -1,4 +1,4 @@
-package blockchain
+package ledger
 
 import (
 	"crypto/sha256"
@@ -19,11 +19,11 @@ type Block struct {
 	Hash         []byte         // SHA-256 of this block's header (see ComputeHash)
 }
 
-// txDigest folds the transaction set into a single SHA-256 digest by hashing
-// the concatenation of every transaction ID in slice order. Each ID already
-// commits to From/To/Amount, so this digest commits to both the contents and
-// the ordering of the block's transactions. IDs are fixed 32-byte values, so no
-// length prefix is needed to keep the stream unambiguous.
+// txDigest folds the transaction set into a single SHA-256 digest by hashing the
+// concatenation of every transaction ID in slice order. Each ID already commits
+// to From/To/Amount, so this digest commits to both the contents and ordering of
+// the block's transactions. IDs are fixed 32-byte values, so no length prefix is
+// needed to keep the stream unambiguous.
 func (b *Block) txDigest() []byte {
 	h := sha256.New()
 	for _, tx := range b.Transactions {

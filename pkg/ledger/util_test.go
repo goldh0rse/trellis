@@ -1,6 +1,10 @@
-package blockchain
+package ledger_test
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/goldh0rse/trellis/pkg/ledger"
+)
 
 func TestShort(t *testing.T) {
 	tests := []struct {
@@ -16,7 +20,7 @@ func TestShort(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := Short(tt.in); got != tt.want {
+			if got := ledger.Short(tt.in); got != tt.want {
 				t.Fatalf("Short(%x) = %q, want %q", tt.in, got, tt.want)
 			}
 		})

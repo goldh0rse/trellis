@@ -28,7 +28,7 @@ run: ## Run the demo binary
 	$(GO) run ./cmd/trellis
 
 bench: ## Run benchmarks with allocation stats
-	$(GO) test -run=^$$ -bench=. -benchmem ./pkg/blockchain/
+	$(GO) test -run=^$$ -bench=. -benchmem ./pkg/...
 
 adr-list: ## List existing ADRs
 	@ls -1 $(ADR_DIR)/[0-9]*.md 2>/dev/null || echo "No ADRs yet."

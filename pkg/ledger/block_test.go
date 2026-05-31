@@ -1,26 +1,27 @@
-package blockchain
+package ledger_test
 
 import (
 	"bytes"
 	"encoding/hex"
 	"strings"
 	"testing"
+
+	"github.com/goldh0rse/trellis/pkg/ledger"
 )
 
 func TestComputeHashDeterministic(t *testing.T) {
 	alice := newTestWallet(t)
 	bobby := newTestWallet(t)
 
-	tx := NewTransaction(alice.PublicKey(), bobby.PublicKey(), 7)
+	tx := ledger.NewTransaction(alice.PublicKey(), bobby.PublicKey(), 7)
 	if err := tx.Sign(alice); err != nil {
 		t.Fatalf("Sign: %v", err)
 	}
 
-	// Construct a block with fixed inputs (fixed Timestamp, fixed txs) so the
-	// hash depends only on stored fields, not the wall clock.
-	b := &Block{
+	// Fixed inputs so the hash depends only on stored fields, not the wall clock.
+	b := &ledger.Block{
 		Timestamp:    1_700_000_000,
-		Transactions: []*Transaction{tx},
+		Transactions: []*ledger.Transaction{tx},
 		PrevHash:     []byte{0xde, 0xad, 0xbe, 0xef},
 	}
 
@@ -34,7 +35,7 @@ func TestComputeHashDeterministic(t *testing.T) {
 func TestMineMeetsDifficulty(t *testing.T) {
 	const difficulty = 3
 
-	b := &Block{
+	b := &ledger.Block{
 		Timestamp:    1_700_000_000,
 		Transactions: nil,
 		PrevHash:     []byte{0xde, 0xad, 0xbe, 0xef},
@@ -60,13 +61,13 @@ func TestMineMeetsDifficulty(t *testing.T) {
 func BenchmarkComputeHash(b *testing.B) {
 	alice := newTestWallet(b)
 	bobby := newTestWallet(b)
-	tx := NewTransaction(alice.PublicKey(), bobby.PublicKey(), 7)
+	tx := ledger.NewTransaction(alice.PublicKey(), bobby.PublicKey(), 7)
 	if err := tx.Sign(alice); err != nil {
 		b.Fatalf("Sign: %v", err)
 	}
-	blk := &Block{
+	blk := &ledger.Block{
 		Timestamp:    1_700_000_000,
-		Transactions: []*Transaction{tx},
+		Transactions: []*ledger.Transaction{tx},
 		PrevHash:     []byte{0xde, 0xad, 0xbe, 0xef},
 	}
 

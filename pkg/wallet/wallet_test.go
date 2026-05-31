@@ -1,10 +1,21 @@
-package blockchain
+package wallet
 
 import (
 	"crypto/sha256"
 	"encoding/hex"
 	"testing"
+
+	"github.com/goldh0rse/trellis/pkg/pqsig"
 )
+
+func newTestWallet(tb testing.TB) *Wallet {
+	tb.Helper()
+	w, err := NewWallet()
+	if err != nil {
+		tb.Fatalf("NewWallet: %v", err)
+	}
+	return w
+}
 
 func TestWalletAddress(t *testing.T) {
 	w := newTestWallet(t)
@@ -31,8 +42,21 @@ func TestWalletAddress(t *testing.T) {
 	}
 }
 
-// BenchmarkNewWallet measures ML-DSA-44 key generation — the most expensive
-// wallet operation, and notably heavier than classical (e.g. ECDSA) keygen.
+func TestWalletSign(t *testing.T) {
+	w := newTestWallet(t)
+	msg := []byte("transfer 30 to bob")
+
+	sig, err := w.Sign(msg)
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+	// A wallet's signature must verify against its own public key.
+	if err := pqsig.Verify(w.PublicKey(), msg, sig); err != nil {
+		t.Fatalf("signature should verify against the wallet's public key, got: %v", err)
+	}
+}
+
+// BenchmarkNewWallet measures wallet creation (an ML-DSA-44 keygen plus wrapping).
 func BenchmarkNewWallet(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
