@@ -1,0 +1,15 @@
+# Compiled binary (go build ./cmd/trellis)
+/trellis
+
+# Test binaries and profiling / coverage output
+*.test
+*.out
+*.prof
+coverage.*
+
+# Go workspace files
+go.work
+go.work.sum
+
+# OS / editor cruft
+.DS_Store
