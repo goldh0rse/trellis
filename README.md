@@ -26,14 +26,20 @@ pkg/wallet/       # identity, built on pqsig
 pkg/ledger/       # data model & rules (one concept per file)
   transaction.go    account-style tx; Signer; Sign / Verify; coinbase
   block.go          SHA-256 hash-linked block; Proof of Work (Mine)
-  chain.go          genesis; AddBlock; IsValid
+  chain.go          genesis; AddBlock; IsValid (Store-backed)
+  store.go          Store interface; ErrBlockNotFound
+  iterator.go       walks the chain tip → genesis
   util.go           display helpers
+pkg/storage/      # persistence — the ONLY importer of go.etcd.io/bbolt + encoding/gob
+  storage.go        Bolt: implements ledger.Store (bbolt buckets, gob blocks)
 ```
 
-Dependencies flow one way: `wallet → pqsig` and `ledger → pqsig`. The ledger
-defines a `Signer` interface (satisfied by a wallet) so it never imports the
-identity layer, and all ML-DSA use is confined to `pqsig` — making the planned
-Go 1.27 `crypto/mldsa` migration a one-file change.
+Dependencies flow one way: `wallet → pqsig`, `ledger → pqsig`, and
+`storage → ledger`. The ledger defines interfaces it needs — `Signer` (satisfied
+by a wallet) and `Store` (satisfied by `storage.Bolt`) — so it never imports the
+identity or storage layers. Each external dependency is confined to one package:
+ML-DSA to `pqsig` (making the planned Go 1.27 `crypto/mldsa` migration a one-file
+change) and bbolt/gob to `storage`.
 
 The model is **account-style**: each transaction is `From → To : Amount`, where
 `From`/`To` are raw ML-DSA public keys. A coinbase transaction (empty `From`) is
@@ -45,16 +51,18 @@ signature-free and is how coins enter circulation.
 go build ./...        # compile
 go vet ./...          # static checks
 go test ./...         # unit tests
-go run ./cmd/trellis  # demo: prints "Chain valid? true" then "false" after tampering
+go run ./cmd/trellis  # demo: build/persist a chain; run again to see it reload
+make clean            # remove the demo database (trellis.db) and binary
 ```
 
-The demo builds a chain, makes a signed transfer, validates it, then tampers
-with the transfer's amount — which is rejected by ML-DSA signature verification.
+On a fresh database the demo mines a genesis block and one signed transfer, then
+prints the chain height and validity. Run it again and it loads the existing
+chain from `trellis.db` — demonstrating that the chain survives restarts.
 
 ## Benchmarks
 
 ```bash
-go test -run=^$ -bench=. -benchmem ./pkg/blockchain/
+make bench   # or: go test -run=^$ -bench=. -benchmem ./pkg/...
 ```
 
 Benchmarks cover key generation, signing, verification, block hashing, and
@@ -66,7 +74,7 @@ validation cost is dominated by the post-quantum signatures.
 
 - [x] **Phase 1** — Foundation + post-quantum signature layer
 - [x] **Phase 2** — Proof of Work (nonce, difficulty, mining)
-- [ ] **Phase 3** — Persistence (bbolt + gob)
+- [x] **Phase 3** — Persistence (bbolt + gob)
 - [ ] **Phase 4** — Wallets, mempool & CLI
 - [ ] **Phase 5** — Networking & consensus (P2P)
 - [ ] **Phase 6** — Tests & polish
