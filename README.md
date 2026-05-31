@@ -64,8 +64,6 @@ validation cost is dominated by the post-quantum signatures.
 - [ ] **Phase 5** — Networking & consensus (P2P)
 - [ ] **Phase 6** — Tests & polish
 
-See [`docs/plans/BUILD_PLAN.md`](docs/plans/BUILD_PLAN.md) for the full plan.
-
 ## Disclaimer
 
 A learning project — not audited, not production-ready. Keys are held in memory
