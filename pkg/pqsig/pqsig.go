@@ -8,8 +8,8 @@ package pqsig
 
 import mldsa "filippo.io/mldsa"
 
-// PrivateKey is an ML-DSA-44 private key. Keep it in memory only for now;
-// persisting the seed is a later concern.
+// PrivateKey is an ML-DSA-44 private key. It is fully described by its 32-byte
+// Seed, which is what callers persist to restore a key via NewPrivateKeyFromSeed.
 type PrivateKey struct {
 	sk *mldsa.PrivateKey
 }
@@ -21,6 +21,22 @@ func GenerateKey() (*PrivateKey, error) {
 		return nil, err
 	}
 	return &PrivateKey{sk: sk}, nil
+}
+
+// NewPrivateKeyFromSeed restores a key from a 32-byte seed (as returned by Seed).
+// It returns an error for any other length.
+func NewPrivateKeyFromSeed(seed []byte) (*PrivateKey, error) {
+	sk, err := mldsa.NewPrivateKey(mldsa.MLDSA44(), seed)
+	if err != nil {
+		return nil, err
+	}
+	return &PrivateKey{sk: sk}, nil
+}
+
+// Seed returns the 32-byte ML-DSA-44 seed — the full secret. Persisting it lets
+// the key be restored with NewPrivateKeyFromSeed.
+func (k *PrivateKey) Seed() []byte {
+	return k.sk.Bytes()
 }
 
 // PublicKey returns the raw 1312-byte ML-DSA-44 public-key encoding. It is what

@@ -60,6 +60,38 @@ func TestVerifyBadSignatureFails(t *testing.T) {
 	}
 }
 
+func TestSeedRoundTrip(t *testing.T) {
+	k := newTestKey(t)
+	seed := k.Seed()
+	if len(seed) != 32 {
+		t.Fatalf("Seed length = %d, want 32", len(seed))
+	}
+
+	restored, err := NewPrivateKeyFromSeed(seed)
+	if err != nil {
+		t.Fatalf("NewPrivateKeyFromSeed: %v", err)
+	}
+	// The restored key has the same public key...
+	if !bytes.Equal(restored.PublicKey(), k.PublicKey()) {
+		t.Fatal("restored key has a different public key")
+	}
+	// ...and can produce signatures the original's public key verifies.
+	msg := []byte("restored signer")
+	sig, err := restored.Sign(msg)
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+	if err := Verify(k.PublicKey(), msg, sig); err != nil {
+		t.Fatalf("signature from restored key should verify, got: %v", err)
+	}
+}
+
+func TestNewPrivateKeyFromSeedWrongLength(t *testing.T) {
+	if _, err := NewPrivateKeyFromSeed([]byte("too short")); err == nil {
+		t.Fatal("NewPrivateKeyFromSeed should reject a wrong-length seed, got nil")
+	}
+}
+
 // BenchmarkGenerateKey measures ML-DSA-44 key generation — notably heavier than
 // classical (e.g. ECDSA) keygen.
 func BenchmarkGenerateKey(b *testing.B) {

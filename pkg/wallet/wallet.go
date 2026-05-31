@@ -25,6 +25,23 @@ func NewWallet() (*Wallet, error) {
 	return &Wallet{priv: priv}, nil
 }
 
+// FromSeed restores a wallet from a 32-byte seed (as returned by Seed).
+func FromSeed(seed []byte) (*Wallet, error) {
+	priv, err := pqsig.NewPrivateKeyFromSeed(seed)
+	if err != nil {
+		return nil, err
+	}
+	return &Wallet{priv: priv}, nil
+}
+
+// Seed returns the wallet's 32-byte seed for persistence.
+//
+// Learning project: seeds are stored unencrypted — never use this to secure
+// anything real.
+func (w *Wallet) Seed() []byte {
+	return w.priv.Seed()
+}
+
 // PublicKey returns the raw public-key bytes used as a transaction's From/To.
 func (w *Wallet) PublicKey() []byte {
 	return w.priv.PublicKey()

@@ -24,14 +24,14 @@ test: ## Run all tests
 cover: ## Run tests with a coverage summary
 	$(GO) test -cover ./...
 
-run: ## Run the demo binary
-	$(GO) run ./cmd/trellis
+run: ## Print the chain (run `go run ./cmd/trellis` for other subcommands)
+	$(GO) run ./cmd/trellis printchain
 
 bench: ## Run benchmarks with allocation stats
 	$(GO) test -run=^$$ -bench=. -benchmem ./pkg/...
 
-clean: ## Remove build artifacts and the demo database
-	rm -f trellis trellis.db
+clean: ## Remove build artifacts, the chain database, and the wallet file
+	rm -f trellis trellis.db wallets.dat
 
 adr-list: ## List existing ADRs
 	@ls -1 $(ADR_DIR)/[0-9]*.md 2>/dev/null || echo "No ADRs yet."
