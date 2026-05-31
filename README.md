@@ -58,7 +58,7 @@ validation cost is dominated by the post-quantum signatures.
 ## Status & roadmap
 
 - [x] **Phase 1** — Foundation + post-quantum signature layer
-- [ ] **Phase 2** — Proof of Work (nonce, difficulty, mining)
+- [x] **Phase 2** — Proof of Work (nonce, difficulty, mining)
 - [ ] **Phase 3** — Persistence (bbolt + gob)
 - [ ] **Phase 4** — Wallets, mempool & CLI
 - [ ] **Phase 5** — Networking & consensus (P2P)

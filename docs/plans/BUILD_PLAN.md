@@ -106,14 +106,14 @@ These large sizes matter for serialization and networking (Phases 3 & 5).
 
 **Goal:** a block is only valid once it has been mined to a target difficulty.
 
-- [ ] Add `Nonce uint64` and a difficulty notion to the design (store
+- [x] Add `Nonce uint64` and a difficulty notion to the design (store
       `Difficulty int` on `Blockchain`; pass it into block creation).
-- [ ] Include `Nonce` in the bytes hashed by `Block.ComputeHash`.
-- [ ] Add `Block.Mine(difficulty int)` that increments `Nonce` until the hex
+- [x] Include `Nonce` in the bytes hashed by `Block.ComputeHash`.
+- [x] Add `Block.Mine(difficulty int)` that increments `Nonce` until the hex
       hash starts with `difficulty` zeros. Return the attempt count.
-- [ ] Mine new blocks in `AddBlock` (genesis may use a fixed/mined nonce).
-- [ ] Extend `IsValid` to also reject any block whose hash fails the difficulty.
-- [ ] Update `main.go` to print attempts and elapsed time per mined block.
+- [x] Mine new blocks in `AddBlock` (genesis is mined to the same difficulty).
+- [x] Extend `IsValid` to also reject any block whose hash fails the difficulty.
+- [x] Update `main.go` to print attempts and elapsed time per mined block.
 
 **Acceptance:** with difficulty 4, mined blocks have hashes starting `0000`;
 `IsValid` returns false if a block's nonce or data is altered.
