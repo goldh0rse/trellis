@@ -80,6 +80,33 @@ func TestSignCoinbaseRejected(t *testing.T) {
 	}
 }
 
+func TestVerifyMissingSignature(t *testing.T) {
+	alice := newTestWallet(t)
+	bobby := newTestWallet(t)
+
+	// A non-coinbase transaction that was never signed.
+	tx := NewTransaction(alice.PublicKey(), bobby.PublicKey(), 5)
+	if err := tx.Verify(); err == nil {
+		t.Fatal("Verify should fail for an unsigned non-coinbase tx, got nil")
+	}
+}
+
+func TestVerifyMalformedFromFails(t *testing.T) {
+	bobby := newTestWallet(t)
+
+	// From is not a valid ML-DSA public key, but a signature is present so we
+	// get past the missing-signature check and into public-key reconstruction.
+	tx := &Transaction{
+		From:      []byte("not a real public key"),
+		To:        bobby.PublicKey(),
+		Amount:    5,
+		Signature: []byte("some bytes"),
+	}
+	if err := tx.Verify(); err == nil {
+		t.Fatal("Verify should fail when From is not a valid public key, got nil")
+	}
+}
+
 // BenchmarkSignTransaction measures producing one ML-DSA-44 signature over a
 // transaction's signing payload.
 func BenchmarkSignTransaction(b *testing.B) {

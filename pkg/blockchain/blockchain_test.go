@@ -51,6 +51,41 @@ func TestChainBrokenLinkIsInvalid(t *testing.T) {
 	}
 }
 
+func TestAddBlockEmptyChain(t *testing.T) {
+	bc := &Blockchain{} // no genesis, no tip
+	if _, err := bc.AddBlock(nil); err == nil {
+		t.Fatal("AddBlock on an empty chain should fail, got nil")
+	}
+}
+
+func TestGenesisNonEmptyPrevHashIsInvalid(t *testing.T) {
+	bobby := newTestWallet(t)
+
+	// A genesis block whose hash is correctly computed *over* a non-empty
+	// PrevHash: step 1 (hash recompute) passes, so step 2's genesis rule fires.
+	genesis := NewBlock([]*Transaction{NewCoinbaseTx(bobby.PublicKey(), 100)}, []byte{0x01})
+	bc := &Blockchain{Blocks: []*Block{genesis}}
+
+	if err := bc.IsValid(); err == nil {
+		t.Fatal("genesis with a non-empty PrevHash should be invalid, got nil")
+	}
+}
+
+func TestCoinbaseOutsideGenesisIsInvalid(t *testing.T) {
+	alice := newTestWallet(t)
+	bobby := newTestWallet(t)
+
+	chain := NewBlockchain(alice.PublicKey(), 100)
+	// A coinbase verifies on its own, but is only allowed in genesis.
+	if _, err := chain.AddBlock([]*Transaction{NewCoinbaseTx(bobby.PublicKey(), 50)}); err != nil {
+		t.Fatalf("AddBlock: %v", err)
+	}
+
+	if err := chain.IsValid(); err == nil {
+		t.Fatal("a coinbase outside genesis should make the chain invalid, got nil")
+	}
+}
+
 // BenchmarkIsValid measures full-chain validation across several chain lengths.
 // Validation cost is dominated by the per-transaction ML-DSA verification, so it
 // scales roughly linearly with the number of blocks.
