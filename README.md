@@ -19,14 +19,21 @@ need to change.
 
 ```
 cmd/trellis/      # demo binary
-pkg/blockchain/   # library (one concept per file)
-  wallet.go         ML-DSA-44 keypair; PublicKey; Address
-  transaction.go    account-style tx; Sign / Verify; coinbase
-  block.go          SHA-256 hash-linked block
-  blockchain.go     genesis; AddBlock; IsValid
+pkg/pqsig/        # post-quantum signatures — the ONLY importer of filippo.io/mldsa
+  pqsig.go          GenerateKey; PrivateKey.Sign; Verify
+pkg/wallet/       # identity, built on pqsig
+  wallet.go         keypair; PublicKey; Sign; Address
+pkg/ledger/       # data model & rules (one concept per file)
+  transaction.go    account-style tx; Signer; Sign / Verify; coinbase
+  block.go          SHA-256 hash-linked block; Proof of Work (Mine)
+  chain.go          genesis; AddBlock; IsValid
   util.go           display helpers
-docs/plans/       # build plan
 ```
+
+Dependencies flow one way: `wallet → pqsig` and `ledger → pqsig`. The ledger
+defines a `Signer` interface (satisfied by a wallet) so it never imports the
+identity layer, and all ML-DSA use is confined to `pqsig` — making the planned
+Go 1.27 `crypto/mldsa` migration a one-file change.
 
 The model is **account-style**: each transaction is `From → To : Amount`, where
 `From`/`To` are raw ML-DSA public keys. A coinbase transaction (empty `From`) is
