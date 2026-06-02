@@ -21,13 +21,15 @@ import (
 	"os"
 
 	"github.com/goldh0rse/trellis/pkg/ledger"
+	"github.com/goldh0rse/trellis/pkg/p2p"
 	"github.com/goldh0rse/trellis/pkg/storage"
 	"github.com/goldh0rse/trellis/pkg/wallet"
 )
 
 const (
-	difficulty = 3   // Proof-of-Work target (leading hex zeros); low for a snappy CLI
-	reward     = 100 // genesis coinbase reward
+	difficulty = 3                // Proof-of-Work target (leading hex zeros); low for a snappy CLI
+	reward     = 100              // genesis coinbase reward
+	seedNode   = "localhost:3000" // the central node every other node syncs from
 )
 
 // config holds the file locations, so tests can sandbox them in a temp dir.
@@ -67,14 +69,16 @@ func run(args []string, cfg config, out io.Writer) error {
 	case "send":
 		return cmdSend(rest, cfg, keyring, out)
 	case "printchain":
-		return cmdPrintChain(cfg, out)
+		return cmdPrintChain(rest, cfg, out)
+	case "startnode":
+		return cmdStartNode(rest, cfg, keyring, out)
 	default:
 		return fmt.Errorf("unknown command %q", cmd)
 	}
 }
 
 func usageError() error {
-	return fmt.Errorf("usage: trellis <createwallet|listaddresses|createblockchain|getbalance|send|printchain> [flags]")
+	return fmt.Errorf("usage: trellis <createwallet|listaddresses|createblockchain|getbalance|send|printchain|startnode> [flags]")
 }
 
 // --- keyring-only commands ---
@@ -105,6 +109,7 @@ func cmdListAddresses(keyring *wallet.Keyring, out io.Writer) error {
 func cmdCreateBlockchain(args []string, cfg config, keyring *wallet.Keyring, out io.Writer) error {
 	fs := flag.NewFlagSet("createblockchain", flag.ContinueOnError)
 	address := fs.String("address", "", "address to receive the genesis reward")
+	db := fs.String("db", "", "chain database path (default: trellis.db)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -113,7 +118,7 @@ func cmdCreateBlockchain(args []string, cfg config, keyring *wallet.Keyring, out
 		return fmt.Errorf("unknown address %q (not in keyring)", *address)
 	}
 
-	store, err := storage.NewBolt(cfg.dbPath)
+	store, err := storage.NewBolt(dbPathOr(*db, cfg))
 	if err != nil {
 		return err
 	}
@@ -137,6 +142,7 @@ func cmdCreateBlockchain(args []string, cfg config, keyring *wallet.Keyring, out
 func cmdGetBalance(args []string, cfg config, keyring *wallet.Keyring, out io.Writer) error {
 	fs := flag.NewFlagSet("getbalance", flag.ContinueOnError)
 	address := fs.String("address", "", "address to query")
+	db := fs.String("db", "", "chain database path (default: trellis.db)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -145,7 +151,7 @@ func cmdGetBalance(args []string, cfg config, keyring *wallet.Keyring, out io.Wr
 		return fmt.Errorf("unknown address %q (not in keyring)", *address)
 	}
 
-	chain, store, err := openChain(cfg, difficulty)
+	chain, store, err := openChain(dbPathOr(*db, cfg), difficulty)
 	if err != nil {
 		return err
 	}
@@ -164,6 +170,8 @@ func cmdSend(args []string, cfg config, keyring *wallet.Keyring, out io.Writer) 
 	from := fs.String("from", "", "sender address")
 	to := fs.String("to", "", "recipient address")
 	amount := fs.Uint64("amount", 0, "amount to send")
+	node := fs.String("node", "", "submit the tx to a running node at this address (default: mine locally)")
+	db := fs.String("db", "", "chain database path for local mode (default: trellis.db)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -174,12 +182,30 @@ func cmdSend(args []string, cfg config, keyring *wallet.Keyring, out io.Writer) 
 	if !ok {
 		return fmt.Errorf("unknown sender address %q (not in keyring)", *from)
 	}
+	// The recipient's public key must be known: an address is a one-way hash, so
+	// even when sending over the network the recipient must be in the shared keyring.
 	toWallet, ok := keyring.Wallet(*to)
 	if !ok {
-		return fmt.Errorf("unknown recipient address %q: this single-node CLI can only send to wallets it holds", *to)
+		return fmt.Errorf("unknown recipient address %q: send can only target wallets in the keyring", *to)
 	}
 
-	chain, store, err := openChain(cfg, difficulty)
+	// Network mode: sign locally and submit to a node, which validates the balance
+	// and (if it mines) confirms the tx in a block.
+	if *node != "" {
+		tx := ledger.NewTransaction(fromWallet.PublicKey(), toWallet.PublicKey(), *amount)
+		if err := tx.Sign(fromWallet); err != nil {
+			return err
+		}
+		if err := p2p.SendTx(*node, tx); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "submitted tx %s (%d from %s to %s) to node %s\n",
+			ledger.Short(tx.ID), *amount, *from, *to, *node)
+		return nil
+	}
+
+	// Local mode: check balance, sign, and mine the block ourselves.
+	chain, store, err := openChain(dbPathOr(*db, cfg), difficulty)
 	if err != nil {
 		return err
 	}
@@ -211,8 +237,13 @@ func cmdSend(args []string, cfg config, keyring *wallet.Keyring, out io.Writer) 
 	return nil
 }
 
-func cmdPrintChain(cfg config, out io.Writer) error {
-	chain, store, err := openChain(cfg, difficulty)
+func cmdPrintChain(args []string, cfg config, out io.Writer) error {
+	fs := flag.NewFlagSet("printchain", flag.ContinueOnError)
+	db := fs.String("db", "", "chain database path (default: trellis.db)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	chain, store, err := openChain(dbPathOr(*db, cfg), difficulty)
 	if err != nil {
 		return err
 	}
@@ -243,10 +274,66 @@ func cmdPrintChain(cfg config, out io.Writer) error {
 	return nil
 }
 
-// openChain opens the store and loads the existing chain, erroring if the chain
-// has not been initialized yet. The caller must Close the returned store.
-func openChain(cfg config, difficulty int) (*ledger.Chain, *storage.Bolt, error) {
-	store, err := storage.NewBolt(cfg.dbPath)
+func cmdStartNode(args []string, cfg config, keyring *wallet.Keyring, out io.Writer) error {
+	fs := flag.NewFlagSet("startnode", flag.ContinueOnError)
+	port := fs.String("port", "3000", "TCP port to listen on")
+	mine := fs.Bool("mine", false, "mine pending transactions into blocks")
+	address := fs.String("address", "", "miner address (optional; validated against the keyring if given)")
+	db := fs.String("db", "", "chain database path (default: trellis.db); give each local node its own")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *mine && *address != "" {
+		if _, ok := keyring.Wallet(*address); !ok {
+			return fmt.Errorf("unknown miner address %q (not in keyring)", *address)
+		}
+	}
+
+	dbPath := dbPathOr(*db, cfg)
+	store, err := storage.NewBolt(dbPath)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+
+	// LoadChain (not NewChain) so a fresh node stays empty and learns genesis from
+	// a peer rather than minting a divergent one.
+	chain, err := ledger.LoadChain(store, difficulty)
+	if err != nil {
+		return err
+	}
+
+	addr := "localhost:" + *port
+	seed := seedNode
+	if addr == seedNode {
+		seed = "" // this is the seed/central node — it has no upstream peer
+	}
+
+	node := p2p.NewNode(p2p.NodeConfig{
+		Addr:       addr,
+		Seed:       seed,
+		Chain:      chain,
+		Mempool:    ledger.NewMempool(),
+		Mining:     *mine,
+		Difficulty: difficulty,
+	})
+	fmt.Fprintf(out, "node listening on %s (mining=%v, db=%s)\n", addr, *mine, dbPath)
+	return node.Run()
+}
+
+// dbPathOr returns the -db flag value if set, otherwise the config default. It
+// lets every chain command target a specific database file (e.g. a second node's).
+func dbPathOr(flagVal string, cfg config) string {
+	if flagVal != "" {
+		return flagVal
+	}
+	return cfg.dbPath
+}
+
+// openChain opens the store at path and loads the existing chain, erroring if the
+// chain has not been initialized yet. The caller must Close the returned store.
+func openChain(path string, difficulty int) (*ledger.Chain, *storage.Bolt, error) {
+	store, err := storage.NewBolt(path)
 	if err != nil {
 		return nil, nil, err
 	}

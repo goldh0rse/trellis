@@ -7,6 +7,7 @@ package storage
 import (
 	"bytes"
 	"encoding/gob"
+	"time"
 
 	bolt "go.etcd.io/bbolt"
 
@@ -26,8 +27,12 @@ type Bolt struct {
 
 // NewBolt opens (creating if needed) a bbolt database at path and ensures the
 // required buckets exist. The caller owns the lifecycle and must Close it.
+//
+// bbolt holds an exclusive lock on the file, so a second process (e.g. a CLI
+// query against a running node's database) fails fast with a timeout rather than
+// blocking forever.
 func NewBolt(path string) (*Bolt, error) {
-	db, err := bolt.Open(path, 0600, nil)
+	db, err := bolt.Open(path, 0600, &bolt.Options{Timeout: 2 * time.Second})
 	if err != nil {
 		return nil, err
 	}

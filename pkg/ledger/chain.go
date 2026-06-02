@@ -34,6 +34,46 @@ func NewChain(store Store, to []byte, reward uint64, difficulty int) (*Chain, er
 	return c, nil
 }
 
+// LoadChain returns a chain over an existing or empty store WITHOUT seeding a
+// genesis. Networked nodes use it: a fresh node starts empty and learns the
+// genesis block from a peer (rather than minting a divergent one of its own).
+func LoadChain(store Store, difficulty int) (*Chain, error) {
+	return &Chain{store: store, Difficulty: difficulty}, nil
+}
+
+// Block returns the stored block with the given hash, or ErrBlockNotFound. It
+// lets callers (e.g. the networking layer) read blocks without touching the Store.
+func (c *Chain) Block(hash []byte) (*Block, error) {
+	return c.store.GetBlock(hash)
+}
+
+// BlockHashes returns every block hash in genesis→tip order. The networking
+// layer advertises and downloads blocks in this order so each one extends the
+// previous when applied.
+func (c *Chain) BlockHashes() ([][]byte, error) {
+	it, err := c.Iterator()
+	if err != nil {
+		return nil, err
+	}
+	var tipToGenesis [][]byte
+	for {
+		b, err := it.Next()
+		if err != nil {
+			return nil, err
+		}
+		if b == nil {
+			break
+		}
+		tipToGenesis = append(tipToGenesis, b.Hash)
+	}
+	// Reverse into genesis→tip order.
+	hashes := make([][]byte, len(tipToGenesis))
+	for i, h := range tipToGenesis {
+		hashes[len(tipToGenesis)-1-i] = h
+	}
+	return hashes, nil
+}
+
 // AddBlock links a new block of transactions onto the current tip, mines it to
 // the chain's difficulty, and persists it. It returns the new block and the
 // number of hashing attempts mining took.
@@ -137,7 +177,7 @@ func (c *Chain) IsValid() error {
 		}
 
 		// 4. Proof of work.
-		if !meetsDifficulty(b.Hash, c.Difficulty) {
+		if !MeetsDifficulty(b.Hash, c.Difficulty) {
 			return fmt.Errorf("block %s: hash does not meet difficulty %d", Short(b.Hash), c.Difficulty)
 		}
 

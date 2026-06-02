@@ -1,8 +1,8 @@
 # Compiled binary (go build ./cmd/trellis)
 /trellis
 
-# Persisted chain database (created by the CLI)
-/trellis.db
+# Persisted chain databases (the CLI default plus any per-node files)
+*.db
 
 # Wallet seeds — UNENCRYPTED secrets, never commit
 /wallets.dat

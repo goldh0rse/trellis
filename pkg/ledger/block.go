@@ -85,8 +85,9 @@ func (b *Block) Mine(difficulty int) uint64 {
 	}
 }
 
-// meetsDifficulty reports whether a hash satisfies the difficulty target, i.e.
-// its hex encoding begins with `difficulty` zeros.
-func meetsDifficulty(hash []byte, difficulty int) bool {
+// MeetsDifficulty reports whether a hash satisfies the difficulty target, i.e.
+// its hex encoding begins with `difficulty` zeros. Exported so the networking
+// layer can validate the Proof of Work of blocks received from peers.
+func MeetsDifficulty(hash []byte, difficulty int) bool {
 	return strings.HasPrefix(hex.EncodeToString(hash), strings.Repeat("0", difficulty))
 }

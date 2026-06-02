@@ -30,8 +30,8 @@ run: ## Print the chain (run `go run ./cmd/trellis` for other subcommands)
 bench: ## Run benchmarks with allocation stats
 	$(GO) test -run=^$$ -bench=. -benchmem ./pkg/...
 
-clean: ## Remove build artifacts, the chain database, and the wallet file
-	rm -f trellis trellis.db wallets.dat
+clean: ## Remove build artifacts, chain databases, and the wallet file
+	rm -f trellis *.db wallets.dat
 
 adr-list: ## List existing ADRs
 	@ls -1 $(ADR_DIR)/[0-9]*.md 2>/dev/null || echo "No ADRs yet."
