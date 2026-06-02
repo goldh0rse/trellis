@@ -34,18 +34,26 @@ pkg/ledger/       # data model & rules (one concept per file)
   mempool.go        pending transactions awaiting mining
   balance.go        account balance by transaction replay
   util.go           display helpers
+  chain_accept.go   AcceptBlock: validate & append a peer's pre-mined block
 pkg/storage/      # persistence — the ONLY importer of go.etcd.io/bbolt + encoding/gob
   storage.go        Bolt: implements ledger.Store (bbolt buckets, gob blocks)
   keyfile.go        KeyFile: implements wallet.KeyStore (gob seed file)
+  memstore.go       MemStore: in-memory ledger.Store (tests, ephemeral nodes)
+pkg/p2p/          # networking — the ONLY importer of net; owns gob-on-the-wire
+  message.go        wire envelope + version/getblocks/inv/getdata/block/tx
+  node.go           Node: TCP server, peer set, lifecycle (mutex-guarded)
+  handlers.go       per-message handlers; sync-by-extension; mine-on-tx
+  client.go         outbound send/broadcast; SendTx (used by the CLI)
 ```
 
-Dependencies flow one way: `wallet → pqsig`, `ledger → pqsig`, and
-`storage → ledger`. Each package defines the interfaces it needs and depends on
+Dependencies flow one way: `wallet → pqsig`, `ledger → pqsig`, `storage → ledger`,
+and `p2p → ledger`. Each package defines the interfaces it needs and depends on
 those, never on the implementing package: the ledger's `Signer` (satisfied by a
-wallet) and `Store` (satisfied by `storage.Bolt`), and the wallet's `KeyStore`
-(satisfied structurally by `storage.KeyFile`). Each external dependency is
-confined to one package: ML-DSA to `pqsig` (making the planned Go 1.27
-`crypto/mldsa` migration a one-file change) and bbolt/gob to `storage`.
+wallet) and `Store` (satisfied by `storage.Bolt`/`storage.MemStore`), and the
+wallet's `KeyStore` (satisfied structurally by `storage.KeyFile`). Each external
+concern is confined to one *adapter*: ML-DSA to `pqsig`, disk (bbolt + gob) to
+`storage`, and the network (`net` + gob-on-the-wire) to `p2p` — the domain
+(`pqsig`/`wallet`/`ledger`) stays free of all of them.
 
 The model is **account-style**: each transaction is `From → To : Amount`, where
 `From`/`To` are raw ML-DSA public keys. A coinbase transaction (empty `From`) is
@@ -85,8 +93,33 @@ go run ./cmd/trellis getbalance -address "$A"         # 70
 go run ./cmd/trellis getbalance -address "$B"         # 30
 ```
 
-This is a single-node CLI: `send` only works between wallets held in the local
-keyring (the recipient's public key must be known).
+`send` only works between wallets held in the local keyring (the recipient's
+public key must be known — an address is a one-way hash).
+
+## Networking (multiple nodes)
+
+Nodes sync over TCP. A fresh node downloads a peer's chain genesis→tip, then
+accepts broadcast blocks that validly extend its tip (sync-by-extension; it never
+adopts a shorter or competing chain). `startnode` serves a node; `send -node`
+submits a signed tx to a running node instead of mining locally.
+
+```bash
+A=$(go run ./cmd/trellis createwallet | awk '{print $NF}')
+X=$(go run ./cmd/trellis createwallet | awk '{print $NF}')
+go run ./cmd/trellis createblockchain -address "$A"          # funds node A's chain (trellis.db)
+
+# Terminal 1 — seed + miner on :3000 (the default seed node):
+go run ./cmd/trellis startnode -port 3000 -mine
+# Terminal 2 — a second node on :3001 with its own DB; it syncs from :3000:
+go run ./cmd/trellis startnode -port 3001 -db nodeb.db
+
+# Terminal 3 — submit a tx via node B; A mines it and both converge:
+go run ./cmd/trellis send -from "$A" -to "$X" -amount 30 -node localhost:3001
+```
+
+Because bbolt is single-writer, inspect a node's database (`printchain`/
+`getbalance -db ...`) only while that node is stopped. The default seed node is
+`localhost:3000`.
 
 ## Benchmarks
 
@@ -105,7 +138,7 @@ validation cost is dominated by the post-quantum signatures.
 - [x] **Phase 2** — Proof of Work (nonce, difficulty, mining)
 - [x] **Phase 3** — Persistence (bbolt + gob)
 - [x] **Phase 4** — Wallets, mempool & CLI
-- [ ] **Phase 5** — Networking & consensus (P2P)
+- [x] **Phase 5** — Networking & consensus (P2P)
 - [ ] **Phase 6** — Tests & polish
 
 ## Disclaimer
